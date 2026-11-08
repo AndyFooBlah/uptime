@@ -1,0 +1,11 @@
+{
+  "name": "uptime",
+  "private": true,
+  "type": "module",
+  "description": "Probes and post-deploy smoke tests for AndyFooBlah's live apps",
+  "license": "Apache-2.0",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}

@@ -1,0 +1,51 @@
+# Post-deploy smoke test: the deployed URL must answer with the expected
+# status and, in a real headless browser, render the expected text with no
+# uncaught page errors. Usage from an app repo's deploy workflow:
+#
+#   - uses: AndyFooBlah/uptime/smoke@main
+#     with:
+#       url: https://example.web.app
+#       ui-text: Continue with Google
+name: smoke
+description: Load a deployed app in a headless browser and check it renders
+inputs:
+  url:
+    description: URL to load
+    required: true
+  ui-text:
+    description: Text that must render (leave empty for an HTTP-only check)
+    required: false
+    default: ""
+  status:
+    description: Expected HTTP status
+    required: false
+    default: "200"
+  contains:
+    description: Text that must be in the raw response body
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 24
+    - name: Install Playwright
+      shell: bash
+      working-directory: ${{ github.action_path }}/..
+      run: |
+        npm ci --ignore-scripts --silent
+        if [ -n "${{ inputs.ui-text }}" ]; then npx playwright install --with-deps chromium >/dev/null; fi
+    - name: Smoke
+      shell: bash
+      working-directory: ${{ github.action_path }}/..
+      env:
+        URL: ${{ inputs.url }}
+        UI: ${{ inputs.ui-text }}
+        STATUS: ${{ inputs.status }}
+        CONTAINS: ${{ inputs.contains }}
+      run: |
+        export PROBE_TARGETS=$(jq -nc --arg u "$URL" --arg ui "$UI" --argjson s "$STATUS" --arg c "$CONTAINS" \
+          '[{name:"deployed app", url:$u, status:$s} + (if $ui != "" then {ui:$ui} else {} end) + (if $c != "" then {contains:$c} else {} end)]')
+        node probe.mjs --ui --out "$RUNNER_TEMP/smoke.json"
+        jq -e 'all(.ok)' "$RUNNER_TEMP/smoke.json" >/dev/null || { echo "::error::Smoke test failed"; exit 1; }
