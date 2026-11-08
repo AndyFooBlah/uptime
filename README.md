@@ -2,7 +2,7 @@
 
 Probes and post-deploy smoke tests for AndyFooBlah's live apps.
 
-- **`probe.yml`** checks every target over HTTP each hour, and loads each UI in headless Chromium once a day at 15:07 UTC. A failing check opens an issue titled `Down: <target> (<check>)`, assigned to the owner, and closes it when the check passes again. Each check gets 3 tries, 20 s apart, so a scale-to-zero cold start doesn't count as an outage.
+- **`probe.yml`** checks every target over HTTP each hour, and loads each UI in headless Chromium once a day at 15:41 UTC. A failing check opens an issue titled `Down: <target> (<check>)`, assigned to the owner, and closes it when the check passes again. Each check gets 3 tries, 20 s apart, so a scale-to-zero cold start doesn't count as an outage.
 - **`smoke/`** is a composite action that app repos run at the end of a deploy:
 
   ```yaml

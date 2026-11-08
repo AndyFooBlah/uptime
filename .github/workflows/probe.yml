@@ -6,7 +6,7 @@ name: probe
 
 on:
   schedule:
-    - cron: "7 * * * *"      # hourly
+    - cron: "41 * * * *"     # hourly, off the top of the hour (scheduled runs near :00 get dropped under load)
   workflow_dispatch:
     inputs:
       ui:
@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      # UI checks once a day at 15:07 UTC (08:07 PDT / 07:07 PST), or on request.
+      # UI checks once a day at 15:41 UTC (08:41 PDT / 07:41 PST), or on request.
       - name: Decide on UI checks
         id: mode
         run: |
@@ -79,7 +79,7 @@ jobs:
 
   # Scheduled workflows in a public repo stop after 60 days without activity.
   heartbeat:
-    if: github.event_name == 'schedule' && github.event.schedule == '7 * * * *'
+    if: github.event_name == 'schedule' && github.event.schedule == '41 * * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
