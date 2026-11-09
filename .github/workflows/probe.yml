@@ -2,11 +2,16 @@
 # A failing target opens (or updates) one issue assigned to the owner; the
 # issue closes itself when the target recovers. Targets live in the
 # PROBE_TARGETS secret; see README.md.
+#
+# Cloud Scheduler starts this every hour at :41 through workflow_dispatch (see
+# dispatcher/), because GitHub's own cron runs hours late on this account. The
+# GitHub cron below is only a watchdog: when it fires, it checks that a
+# dispatched run happened recently, and runs the probe itself if not.
 name: probe
 
 on:
   schedule:
-    - cron: "41 * * * *"     # hourly, off the top of the hour (scheduled runs near :00 get dropped under load)
+    - cron: "41 * * * *"
   workflow_dispatch:
     inputs:
       ui:
@@ -15,6 +20,7 @@ on:
         default: false
 
 permissions:
+  actions: read
   contents: read
   issues: write
 
@@ -23,7 +29,44 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Scheduled runs only: is the Cloud Scheduler dispatcher alive?
+  watchdog:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      stale: ${{ steps.check.outputs.stale }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      OWNER: AndyFooBlah
+    steps:
+      - id: check
+        run: |
+          set -euo pipefail
+          last=$(gh run list --workflow probe.yml --event workflow_dispatch --limit 1 --json createdAt --jq '.[0].createdAt // ""')
+          age=$(( $(date +%s) - $(date -d "${last:-1970-01-01T00:00:00Z}" +%s) ))
+          title="Down: dispatcher (schedule)"
+          gh label create down --color B60205 --description "A probe is failing" --force >/dev/null
+          num=$(gh issue list --label down --state open --json number,title | jq -r --arg t "$title" '.[] | select(.title==$t) | .number')
+          # Three missed hours, so one slow dispatch doesn't page anyone.
+          if [ "$age" -gt 10800 ]; then
+            echo stale=true >> "$GITHUB_OUTPUT"
+            body="No dispatched probe run since ${last:-ever}. Check the probe-dispatch Cloud Scheduler job and Workflow in andybrook-uptime, and the github-probe-dispatch token (expired?). This scheduled run probes in its place. Run: $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
+            if [ -z "$num" ]; then
+              gh issue create --title "$title" --label down --assignee "$OWNER" --body "$body"
+            else
+              gh issue comment "$num" --body "Still stale. $body"
+            fi
+          else
+            echo stale=false >> "$GITHUB_OUTPUT"
+            [ -z "$num" ] || gh issue close "$num" --comment "Dispatched runs are back (last at $last)."
+          fi
+
   probe:
+    needs: watchdog
+    # Dispatched runs always probe; scheduled runs only when the dispatcher is down.
+    if: always() && (github.event_name != 'schedule' || needs.watchdog.outputs.stale == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -77,9 +120,10 @@ jobs:
           { echo "| target | check | result |"; echo "|---|---|---|";
             jq -r '.[] | "| \(.name) | \(.kind) | \(if .ok then "ok" else "**FAIL** " + .error end) |"' results.json; } >> "$GITHUB_STEP_SUMMARY"
 
-  # Scheduled workflows in a public repo stop after 60 days without activity.
+  # Scheduled workflows in a public repo stop after 60 days without activity,
+  # which would take the watchdog with them. Commit at most once a week.
   heartbeat:
-    if: github.event_name == 'schedule' && github.event.schedule == '41 * * * *'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -88,8 +132,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Weekly heartbeat commit
         run: |
-          # Mondays at 15:xx UTC only.
-          [ "$(date -u +%u%H)" = "115" ] || exit 0
+          last=$(git log -1 --format=%ct)
+          [ $(( $(date +%s) - last )) -gt 518400 ] || exit 0
           date -u +%Y-%m-%dT%H:%MZ > HEARTBEAT
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
